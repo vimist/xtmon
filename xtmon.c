@@ -43,7 +43,8 @@ void signal_handler(const int sig_num) {
 		event.format = 32;
 		event.window = XTMON;
 
-		xcb_send_event(CONN, false, XTMON, XCB_EVENT_MASK_NO_EVENT, (const char *)&event);
+		xcb_send_event(
+			CONN, false, XTMON, XCB_EVENT_MASK_NO_EVENT, (const char *)&event);
 		xcb_flush(CONN);
 	}
 }
@@ -86,9 +87,9 @@ xcb_atom_t get_atom(const char atom_name[]) {
  * @param[in] window The window to get the title for.
  * @param[out] title Will be populated with the window title.
  *
- * @return The size (in characters, not bytes) of the title.
+ * @return Whether the window title was successfully retrieved.
  */
-size_t get_window_title(const xcb_window_t window, wchar_t title[]) {
+bool get_window_title(const xcb_window_t window, wchar_t title[]) {
 	xcb_get_property_cookie_t cookie;
 	xcb_get_property_reply_t *reply;
 
@@ -102,6 +103,10 @@ size_t get_window_title(const xcb_window_t window, wchar_t title[]) {
 			(sizeof(wchar_t) * MAX_TITLE_LENGTH) / 4);
 
 		reply = xcb_get_property_reply(CONN, cookie, NULL);
+
+		if (!reply) {
+			return false;
+		}
 
 		new_title = xcb_get_property_value(reply);
 		title_length = xcb_get_property_value_length(reply);
@@ -135,7 +140,7 @@ size_t get_window_title(const xcb_window_t window, wchar_t title[]) {
 
 	free(reply);
 
-	return title_length;
+	return true;
 }
 
 /**
@@ -154,7 +159,8 @@ size_t get_managed_windows(xcb_window_t windows[]) {
 	xcb_get_property_reply_t *reply = xcb_get_property_reply(
 		CONN, cookie, NULL);
 
-	size_t num_windows = xcb_get_property_value_length(reply) / sizeof(xcb_window_t);
+	size_t num_windows =
+		xcb_get_property_value_length(reply) / sizeof(xcb_window_t);
 
 	memcpy(
 		windows, xcb_get_property_value(reply),
@@ -336,8 +342,9 @@ int main(const int argc, const char *argv[]) {
 		// Subscribe to property change events
 		subscribe(windows[i]);
 
-		get_window_title(windows[i], title);
-		wprintf(OUTPUT_FORMAT, "initial_title", windows[i], title);
+		if (get_window_title(windows[i], title)) {
+			wprintf(OUTPUT_FORMAT, "initial_title", windows[i], title);
+		}
 
 		// Output the initially focused window
 		if (windows[i] == focused_window) {
@@ -358,16 +365,23 @@ int main(const int argc, const char *argv[]) {
 		response_type = event->response_type & XCB_EVENT_RESPONSE_TYPE_MASK;
 
 		if (response_type == XCB_PROPERTY_NOTIFY) {
-			xcb_property_notify_event_t *property_event = (xcb_property_notify_event_t *)event;
+			xcb_property_notify_event_t *property_event =
+				(xcb_property_notify_event_t *)event;
 
-			if (property_event->atom == _NET_WM_NAME) {
-				get_window_title(property_event->window, title);
-				wprintf(OUTPUT_FORMAT, "title_changed", property_event->window, title);
-			} else if (property_event->window == ROOT && property_event->atom == _NET_CLIENT_LIST) {
-				delta = update_managed_windows(windows, &num_windows, &changed_window);
+			if (
+				property_event->atom == _NET_WM_NAME
+				&& get_window_title(property_event->window, title)
+			) {
+				wprintf(OUTPUT_FORMAT,
+					"title_changed", property_event->window, title);
+			} else if (
+				property_event->window == ROOT
+				&& property_event->atom == _NET_CLIENT_LIST
+			) {
+				delta = update_managed_windows(
+					windows, &num_windows, &changed_window);
 
-				if (delta == 1) {
-					get_window_title(changed_window, title);
+				if (delta == 1 && get_window_title(changed_window, title)) {
 					wprintf(OUTPUT_FORMAT, "new_window", changed_window, title);
 				} else if (delta == -1) {
 					wprintf(OUTPUT_FORMAT, "removed_window", changed_window, L"");
@@ -378,11 +392,17 @@ int main(const int argc, const char *argv[]) {
 						L"warning: at the window limit, things might be wonky "
 						L"from here on out\n");
 				}
-			} else if (property_event->window == ROOT && property_event->atom == _NET_ACTIVE_WINDOW) {
+			} else if (
+				property_event->window == ROOT
+				&& property_event->atom == _NET_ACTIVE_WINDOW
+			) {
 				focused_window = get_focused_window();
 
-				if (focused_window > 0) {
-					get_window_title(focused_window, title);
+				if (
+					focused_window > 0
+					&& get_window_title(focused_window, title)
+				) {
+					
 					wprintf(OUTPUT_FORMAT, "focus_changed", focused_window, title);
 				} else {
 					wprintf(OUTPUT_FORMAT, "focus_changed", 0, L"");
@@ -392,7 +412,8 @@ int main(const int argc, const char *argv[]) {
 			fflush(stdout);
 			free(event);
 		} else if (response_type == XCB_CLIENT_MESSAGE) {
-			xcb_client_message_event_t *client_event = (xcb_client_message_event_t *)event;
+			xcb_client_message_event_t *client_event =
+				(xcb_client_message_event_t *)event;
 
 			if (client_event->window == XTMON) {
 				free(event);
@@ -400,7 +421,6 @@ int main(const int argc, const char *argv[]) {
 			}
 		}
 	}
-
 
 	xcb_disconnect(CONN);
 }
